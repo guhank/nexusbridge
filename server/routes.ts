@@ -510,12 +510,35 @@ export async function registerRoutes(
   }
 
   // Handle MCP requests via StreamableHTTP transport
+  // Stateless mode: each request creates a fresh MCP server + transport
+  // Supports POST (JSON-RPC), GET (SSE), and DELETE per MCP Streamable HTTP spec
   app.all("/mcp", async (req, res) => {
     try {
+      // For GET requests, return server metadata (helps Smithery scanner)
+      if (req.method === "GET") {
+        res.setHeader("Content-Type", "text/event-stream");
+        res.setHeader("Cache-Control", "no-cache");
+        res.setHeader("Connection", "keep-alive");
+        // Create a stateless transport and let it handle the GET for SSE
+        const mcpServer = createMcpServerInstance();
+        const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
+        await mcpServer.connect(transport);
+        await transport.handleRequest(req as any, res as any);
+        return;
+      }
+
+      if (req.method === "DELETE") {
+        // Stateless mode — no sessions to delete
+        res.status(200).json({ ok: true });
+        return;
+      }
+
+      // POST: JSON-RPC requests
       const mcpServer = createMcpServerInstance();
-      const transport = new StreamableHTTPServerTransport("/mcp");
+      const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
       await mcpServer.connect(transport);
-      await transport.handleRequest(req as any, res as any);
+      // Pass pre-parsed body (Express already parsed JSON)
+      await transport.handleRequest(req as any, res as any, req.body);
     } catch (error: any) {
       console.error("MCP endpoint error:", error);
       if (!res.headersSent) {
