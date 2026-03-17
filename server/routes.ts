@@ -406,6 +406,7 @@ export async function registerRoutes(
       {
         api_key: z.string().describe("Your NexusBridge API key. Starts with nb_sk_. Get one at https://syntss.com"),
       },
+      { title: "List Service Catalog", readOnlyHint: true, idempotentHint: true, openWorldHint: true },
       async ({ api_key }) => {
         try {
           const apiKey = await storage.getApiKeyByKey(api_key);
@@ -433,6 +434,7 @@ export async function registerRoutes(
         slug: z.string().describe("The service slug to execute. Must match a slug from the catalog. Common values: 'llm-chat' for chat completions with 200+ models, 'llm-code' for code generation, 'image-gen' for image creation, 'text-embedding' for vector embeddings, 'web-search' for structured web results, 'doc-parser' for document extraction, 'sentiment' for sentiment analysis, 'translation' for language translation, 'summarize' for text summarization, 'code-exec' for sandboxed code execution."),
         params: z.record(z.unknown()).optional().describe("Service-specific parameters as a JSON object. For 'llm-chat': {messages: [{role: 'user', content: '...'}], model?: 'deepseek/deepseek-chat-v3-0324', max_tokens?: 1024}. For 'sentiment': {text: '...'}. For 'web-search': {query: '...'}. For 'summarize': {text: '...'}. For 'translation': {text: '...', from?: 'auto', to: 'en'}. Omit or pass {} to use defaults."),
       },
+      { title: "Execute AI Service", readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
       async ({ api_key, slug, params }) => {
         try {
           const apiKey = await storage.getApiKeyByKey(api_key);
@@ -489,6 +491,7 @@ export async function registerRoutes(
       {
         api_key: z.string().describe("Your NexusBridge API key. Starts with nb_sk_. Get one at https://syntss.com"),
       },
+      { title: "Check Credit Balance", readOnlyHint: true, idempotentHint: true, openWorldHint: true },
       async ({ api_key }) => {
         try {
           const apiKey = await storage.getApiKeyByKey(api_key);
@@ -506,6 +509,51 @@ export async function registerRoutes(
           return { content: [{ type: "text" as const, text: `Error: ${error.message}` }], isError: true };
         }
       }
+    );
+
+    // Prompt: How to use NexusBridge
+    mcp.prompt(
+      "use_nexusbridge",
+      "A step-by-step guide for using NexusBridge to access 200+ AI models and services through a single API key.",
+      async () => ({
+        messages: [
+          {
+            role: "user" as const,
+            content: {
+              type: "text" as const,
+              text: "How do I use NexusBridge to call AI services?",
+            },
+          },
+          {
+            role: "assistant" as const,
+            content: {
+              type: "text" as const,
+              text: `# Using NexusBridge\n\nNexusBridge gives you access to 200+ AI models and 10 service categories through a single API key.\n\n## Step 1: Discover available services\nCall \`nexusbridge_catalog\` with your API key to get the full list of services and your current credit balance.\n\n## Step 2: Execute a service\nCall \`nexusbridge_execute\` with your API key, the service slug, and parameters. Examples:\n\n**Chat with an AI model:**\n\`\`\`\nslug: "llm-chat"\nparams: { messages: [{ role: "user", content: "Hello!" }], model: "deepseek/deepseek-chat-v3-0324" }\n\`\`\`\n\n**Search the web:**\n\`\`\`\nslug: "web-search"\nparams: { query: "latest AI news" }\n\`\`\`\n\n**Generate an image:**\n\`\`\`\nslug: "image-gen"\nparams: { prompt: "a futuristic bridge connecting two AI nodes" }\n\`\`\`\n\n## Step 3: Check your balance\nCall \`nexusbridge_balance\` to monitor your remaining credits.\n\n## Available service categories\nllm-chat, llm-code, image-gen, text-embedding, web-search, doc-parser, sentiment, translation, summarize, code-exec\n\nGet your API key at https://syntss.com`,
+            },
+          },
+        ],
+      })
+    );
+
+    // Prompt: Execute a specific AI service
+    mcp.prompt(
+      "execute_service",
+      "Prompt template for executing a specific NexusBridge AI service by category.",
+      {
+        service: z.string().describe("The type of AI service to use (e.g. llm-chat, image-gen, web-search, sentiment, translation, summarize, code-exec)"),
+        input: z.string().describe("The input text or query for the service"),
+      },
+      async ({ service, input }) => ({
+        messages: [
+          {
+            role: "user" as const,
+            content: {
+              type: "text" as const,
+              text: `Use NexusBridge to run the "${service}" service with this input: ${input}\n\nFirst call nexusbridge_catalog to confirm the service is available and check your balance. Then call nexusbridge_execute with slug="${service}" and the appropriate params object for the input provided.`,
+            },
+          },
+        ],
+      })
     );
 
     return mcp;
