@@ -2,12 +2,20 @@ FROM node:20-slim
 
 WORKDIR /app
 
-# Copy built output
-COPY dist/ ./dist/
-COPY package.json ./
+# Copy package files first for better caching
+COPY package.json package-lock.json ./
 
-# Install production dependencies only
-RUN npm install --production --ignore-scripts
+# Install ALL dependencies (need devDependencies for build)
+RUN npm ci
+
+# Copy source code
+COPY . .
+
+# Build the app (frontend + backend)
+RUN npm run build
+
+# Remove devDependencies after build
+RUN npm prune --production
 
 # Expose port
 EXPOSE 5000

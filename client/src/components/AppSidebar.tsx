@@ -1,5 +1,5 @@
 import { Link, useLocation } from "wouter";
-import { LayoutDashboard, FileText, Moon, Sun } from "lucide-react";
+import { Home, LayoutDashboard, FileText, Moon, Sun } from "lucide-react";
 import { useTheme } from "./ThemeProvider";
 import { cn } from "@/lib/utils";
 
@@ -31,7 +31,8 @@ function NexusBridgeLogo() {
 }
 
 const navItems = [
-  { href: "/", label: "Dashboard", icon: LayoutDashboard },
+  { href: "/", label: "Home", icon: Home },
+  { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/docs", label: "API Docs", icon: FileText },
 ];
 

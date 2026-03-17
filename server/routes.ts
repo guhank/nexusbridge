@@ -4,6 +4,9 @@ import { storage } from "./storage";
 import { insertServiceSchema, insertApiKeySchema } from "@shared/schema";
 import type { Service } from "@shared/schema";
 import { randomUUID } from "crypto";
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
+import { z } from "zod";
 
 function generateKey(): string {
   const chars = "abcdefghijklmnopqrstuvwxyz0123456789";
@@ -382,6 +385,143 @@ export async function registerRoutes(
       remainingBalance: parseFloat((apiKey.creditBalance - service.pricePerCall).toFixed(4)),
       result,
     });
+  });
+
+  // ===== MCP Endpoint for Smithery Gateway =====
+  // Exposes NexusBridge services via Model Context Protocol at /mcp
+  // AI agents can discover and consume services autonomously.
+
+  function createMcpServerInstance(): McpServer {
+    const mcp = new McpServer({
+      name: "nexusbridge",
+      version: "1.0.0",
+    });
+
+    // Tool: nexusbridge_catalog
+    mcp.tool(
+      "nexusbridge_catalog",
+      "List all available NexusBridge services with their pricing and descriptions.",
+      {
+        api_key: z.string().describe("Your NexusBridge API key (nb_sk_...)"),
+      },
+      async ({ api_key }) => {
+        try {
+          const apiKey = await storage.getApiKeyByKey(api_key);
+          if (!apiKey || !apiKey.isActive) {
+            return { content: [{ type: "text" as const, text: JSON.stringify({ error: "Invalid or inactive API key" }) }], isError: true };
+          }
+          const services = await storage.getServices();
+          const activeServices = services.filter(s => s.isActive).map(s => ({
+            slug: s.slug, name: s.name, category: s.category,
+            description: s.description, pricePerCall: s.pricePerCall,
+          }));
+          return { content: [{ type: "text" as const, text: JSON.stringify({ services: activeServices, creditBalance: apiKey.creditBalance }, null, 2) }] };
+        } catch (error: any) {
+          return { content: [{ type: "text" as const, text: `Error: ${error.message}` }], isError: true };
+        }
+      }
+    );
+
+    // Tool: nexusbridge_execute
+    mcp.tool(
+      "nexusbridge_execute",
+      "Execute a NexusBridge service. Credits are deducted automatically.",
+      {
+        api_key: z.string().describe("Your NexusBridge API key"),
+        slug: z.string().describe("Service slug (e.g., 'llm-chat', 'web-search', 'sentiment')"),
+        params: z.record(z.unknown()).optional().describe("Service parameters"),
+      },
+      async ({ api_key, slug, params }) => {
+        try {
+          const apiKey = await storage.getApiKeyByKey(api_key);
+          if (!apiKey || !apiKey.isActive) {
+            return { content: [{ type: "text" as const, text: JSON.stringify({ error: "Invalid or inactive API key" }) }], isError: true };
+          }
+          const service = await storage.getServiceBySlug(slug);
+          if (!service || !service.isActive) {
+            return { content: [{ type: "text" as const, text: JSON.stringify({ error: "Service not found or inactive" }) }], isError: true };
+          }
+          if (apiKey.creditBalance < service.pricePerCall) {
+            return { content: [{ type: "text" as const, text: JSON.stringify({ error: "Insufficient credits", required: service.pricePerCall, balance: apiKey.creditBalance }) }], isError: true };
+          }
+          await storage.updateApiKeyBalance(apiKey.id, parseFloat((apiKey.creditBalance - service.pricePerCall).toFixed(4)));
+          let result: any;
+          let status = "completed";
+          try {
+            if (service.providerType === "openrouter") {
+              result = await executeOpenRouterService(service, params || {});
+            } else {
+              result = await executeDirectProxy(service, params || {});
+            }
+          } catch (err: any) {
+            status = "failed";
+            result = { error: err.message || "Upstream provider error" };
+          }
+          const profit = parseFloat((service.pricePerCall - service.costPerCall).toFixed(4));
+          await storage.createTransaction({
+            apiKeyId: apiKey.id, serviceId: service.id, serviceName: service.name,
+            amount: service.pricePerCall, cost: service.costPerCall, profit, status,
+          });
+          await storage.incrementServiceStats(service.id, service.pricePerCall);
+          return {
+            content: [{
+              type: "text" as const,
+              text: JSON.stringify({
+                success: status === "completed", service: service.slug,
+                charged: service.pricePerCall,
+                remainingBalance: parseFloat((apiKey.creditBalance - service.pricePerCall).toFixed(4)),
+                result,
+              }, null, 2),
+            }],
+          };
+        } catch (error: any) {
+          return { content: [{ type: "text" as const, text: `Error: ${error.message}` }], isError: true };
+        }
+      }
+    );
+
+    // Tool: nexusbridge_balance
+    mcp.tool(
+      "nexusbridge_balance",
+      "Check your current NexusBridge credit balance.",
+      {
+        api_key: z.string().describe("Your NexusBridge API key"),
+      },
+      async ({ api_key }) => {
+        try {
+          const apiKey = await storage.getApiKeyByKey(api_key);
+          if (!apiKey || !apiKey.isActive) {
+            return { content: [{ type: "text" as const, text: JSON.stringify({ error: "Invalid or inactive API key" }) }], isError: true };
+          }
+          const services = await storage.getServices();
+          return {
+            content: [{
+              type: "text" as const,
+              text: JSON.stringify({ creditBalance: apiKey.creditBalance, serviceCount: services.filter(s => s.isActive).length }, null, 2),
+            }],
+          };
+        } catch (error: any) {
+          return { content: [{ type: "text" as const, text: `Error: ${error.message}` }], isError: true };
+        }
+      }
+    );
+
+    return mcp;
+  }
+
+  // Handle MCP requests via StreamableHTTP transport
+  app.all("/mcp", async (req, res) => {
+    try {
+      const mcpServer = createMcpServerInstance();
+      const transport = new StreamableHTTPServerTransport("/mcp");
+      await mcpServer.connect(transport);
+      await transport.handleRequest(req as any, res as any);
+    } catch (error: any) {
+      console.error("MCP endpoint error:", error);
+      if (!res.headersSent) {
+        res.status(500).json({ error: "MCP transport error", message: error.message });
+      }
+    }
   });
 
   return httpServer;
