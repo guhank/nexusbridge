@@ -395,14 +395,16 @@ export async function registerRoutes(
     const mcp = new McpServer({
       name: "nexusbridge",
       version: "1.0.0",
+      description:
+        "NexusBridge is a unified AI API brokerage. Use this server to access 200+ AI models and 10 service categories — LLM chat completions, code generation, image generation, text embeddings, web search, document parsing, sentiment analysis, translation, summarization, and sandboxed code execution — through a single API key with transparent per-call pricing. Credits never expire. No subscriptions required. Call nexusbridge_catalog first to discover available services and check your credit balance, then use nexusbridge_execute to run any service by its slug.",
     });
 
     // Tool: nexusbridge_catalog
     mcp.tool(
       "nexusbridge_catalog",
-      "List all available NexusBridge services with their pricing and descriptions.",
+      "Retrieve the full NexusBridge service catalog. Returns every available service with its slug, name, category, description, and per-call price in USD. Also returns your current credit balance. Call this tool first before executing any service to discover what is available and confirm you have sufficient credits.",
       {
-        api_key: z.string().describe("Your NexusBridge API key (nb_sk_...)"),
+        api_key: z.string().describe("Your NexusBridge API key. Starts with nb_sk_. Get one at https://syntss.com"),
       },
       async ({ api_key }) => {
         try {
@@ -425,11 +427,11 @@ export async function registerRoutes(
     // Tool: nexusbridge_execute
     mcp.tool(
       "nexusbridge_execute",
-      "Execute a NexusBridge service. Credits are deducted automatically.",
+      "Execute a NexusBridge service by its slug. Credits are deducted from your balance automatically based on the service's per-call price. Returns the upstream provider's response wrapped in a standard envelope with fields: success (boolean), service (slug used), charged (USD amount deducted), remainingBalance (credits left), and result (the upstream response object). For LLM services, pass a messages array in params. For search, pass a query string. For sentiment/summarization, pass a text string. Call nexusbridge_catalog first if you are unsure which slug to use or what params a service accepts.",
       {
-        api_key: z.string().describe("Your NexusBridge API key"),
-        slug: z.string().describe("Service slug (e.g., 'llm-chat', 'web-search', 'sentiment')"),
-        params: z.record(z.unknown()).optional().describe("Service parameters"),
+        api_key: z.string().describe("Your NexusBridge API key. Starts with nb_sk_. Get one at https://syntss.com"),
+        slug: z.string().describe("The service slug to execute. Must match a slug from the catalog. Common values: 'llm-chat' for chat completions with 200+ models, 'llm-code' for code generation, 'image-gen' for image creation, 'text-embedding' for vector embeddings, 'web-search' for structured web results, 'doc-parser' for document extraction, 'sentiment' for sentiment analysis, 'translation' for language translation, 'summarize' for text summarization, 'code-exec' for sandboxed code execution."),
+        params: z.record(z.unknown()).optional().describe("Service-specific parameters as a JSON object. For 'llm-chat': {messages: [{role: 'user', content: '...'}], model?: 'deepseek/deepseek-chat-v3-0324', max_tokens?: 1024}. For 'sentiment': {text: '...'}. For 'web-search': {query: '...'}. For 'summarize': {text: '...'}. For 'translation': {text: '...', from?: 'auto', to: 'en'}. Omit or pass {} to use defaults."),
       },
       async ({ api_key, slug, params }) => {
         try {
@@ -483,9 +485,9 @@ export async function registerRoutes(
     // Tool: nexusbridge_balance
     mcp.tool(
       "nexusbridge_balance",
-      "Check your current NexusBridge credit balance.",
+      "Check your current NexusBridge credit balance in USD and the number of active services available. Use this tool to verify you have enough credits before executing expensive operations, or to monitor spending after a batch of calls. Returns creditBalance (number in USD) and serviceCount (integer).",
       {
-        api_key: z.string().describe("Your NexusBridge API key"),
+        api_key: z.string().describe("Your NexusBridge API key. Starts with nb_sk_. Get one at https://syntss.com"),
       },
       async ({ api_key }) => {
         try {
